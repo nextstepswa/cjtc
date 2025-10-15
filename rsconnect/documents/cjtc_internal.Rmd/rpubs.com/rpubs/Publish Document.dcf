@@ -1,0 +1,10 @@
+name: Publish Document
+title:
+username:
+account: rpubs
+server: rpubs.com
+hostUrl: rpubs.com
+appId: https://api.rpubs.com/api/v1/document/1353500/bddd7dc29fc54bef9c2b3ba1e14e0049
+bundleId: https://api.rpubs.com/api/v1/document/1353500/bddd7dc29fc54bef9c2b3ba1e14e0049
+url: http://rpubs.com/moxbox/1353500
+version: 1

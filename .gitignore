@@ -1,0 +1,16 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+
+# gtags
+gtag.*
+
+# html
+*.html
+
+# Old stuff
+Old/
+
+# Analyses (for now)
+Analyses/

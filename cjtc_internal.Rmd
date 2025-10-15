@@ -1,0 +1,1528 @@
+---
+title: "CJTC certification database"
+author: "Next Steps Washington"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+    includes:
+      in_header: gtag.cjtc_decert_internal.html
+---
+
+<base target="_blank"/>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(kableExtra)
+library(ggplot2)
+library(plotly)
+library(patchwork)
+
+# function for plotly https://stackoverflow.com/questions/59611914/reverse-the-legend-order-when-using-ggplotly
+reverse_legend_labels <- function(plotly_plot) {
+  n_labels <- length(plotly_plot$x$data)
+  plotly_plot$x$data[1:n_labels] <- plotly_plot$x$data[n_labels:1]
+  plotly_plot
+}
+
+options(knitr.kable.NA = '')
+
+```
+
+```{r data, message=F, warning=FALSE}
+load("Data/cjtc_internal.rda")
+cjtc <- cjtc_internal
+
+# indices for plotting
+
+## all yr-mo in data
+yr_mo_all <- paste0(sort(rep(2002:2025, 12)), "-", rep(01:12, 24))
+seqnum_all <- 1:(length(yr_mo_all))
+
+seqnum_5051 <- seqnum_all[yr_mo_all == "2021-6"]
+seqnum_current <- seqnum_all[yr_mo_all == "2022-6"]
+
+index_all <- data.frame(seqnum = seqnum_all,  yr_mo = yr_mo_all) %>%
+  filter(seqnum < (max(seqnum)-2)) %>% # only thru 9/2025 
+  mutate(period = case_when(
+    seqnum <= seqnum_5051 ~ "pre.5051",
+    seqnum > seqnum_current ~ "current",
+    TRUE ~ "interim"
+  ))
+
+## post 5051
+index_post_5051 <- index_all %>% filter(period != "pre.5051")
+
+```
+
+# Introduction {.tabset}
+
+## Overview
+
+The WA State process for investigating law enforcement officers for misconduct and possible decertification was revised in 2021 by Senate Bill 5051 (see the ["SB 5051"](#sb-5051) tab above for details). 
+The process is tracked internally by CJTC with a "certification database", and
+this report presents basic descriptive statistics from the *internal* version of that database (see the ["On the data"](#on-the-data) tab above for details).
+
+For some of the tables and plots we split the data into 3 periods by the date the case was received:
+
+* pre-5051 (before July 2021),  
+* "interim" (July 2021 - June 2022, a period when the new system was being set up), and  
+* "current" (after June 2022, when the system was fully functional)
+
+In other places, we combine the second two periods into "post-5051".
+
+A list of officers that have received multiple complaints or agency notices of misconduct can be found in the ["Officers" section of this report](#officer).  The list can be searched, sorted, filtered and downloaded in several different formats.
+
+____
+
+> Navigating this report: 
+
+* You can use the TOC on the left to view specific sections based on content.
+
+* Within sections, look for the tabs in the document to view all of the different tables and graphs.  Tabs are typically just below the section headers, but some sections have additional nested tabs below.
+
+____
+
+
+This is a first draft, so there may be some errors in the precise numbers presented. Comments/suggestions/questions are welcomed and appreciated.
+
+____
+
+## SB 5051
+
+* The text of SB5051 can be found [here](https://lawfilesext.leg.wa.gov/biennium/2021-22/Pdf/Bills/Session%20Laws/Senate/5051-S2.SL.pdf?cite=2021%20c%20323%20s%209),
+
+* A user-friendly description of the complaint submission process can be found on the CJTC website here: https://cjtc.wa.gov/certification/certification-complaint-process,
+
+* The current RCW that governs the CJTC process can be found online [here](https://app.leg.wa.gov/rcw/default.aspx?cite=43.101.105).  
+
+____
+
+## On the data
+
+The CJTC maintains a database to track publicly filed complaints, agency notifications of officer misconduct ("Form 1915"), and Division initiated investigations that require review and may lead to officer decertification.  Note that decertification, and especially involuntary decertification, is a very rare outcome (you can verify this in the [Outcomes](#outcomes) section of this report).
+
+Case processing involves 3 general steps:  *Intake* (entered into the database, initial review), *Assessment* (either closed without investigation or forwarded to investigation) and *Determination* (if forwarded for investigation, either decline to charge or charge with a hearing and outcome).  At any step in the process, an officer may voluntarily surrender their certification.
+
+There are two versions of the database:
+
+* An internal version that includes all cases
+
+* A public version that excludes cases in the "Intake" process, and is available [online at the CJTC website](https://cjtc.wa.gov/certification/database).
+
+The format and case coverage of the two datasets is different, but they otherwise include almost the same information.
+
+> This report is based on the Internal Dataset
+
+The internal dataset was obtained via PDR by Dom Campese of the WCPA, and contains all cases up through 9/24/2025.
+
+One of the key differences between the internal and public dataset formats is how the individual records in the dataset are defined.  In the public dataset, each record is a "case-person", defined by a case number and a person's name.  In the internal dataset, one record is used per offense (a complaint or form 1915 can lead to multiple offenses being charged for the same case-person), with additional records used to track attorney- or union-represented officers, some complainants and witnesses, and a few other categories of persons.  **As a result there are many more records in the internal dataset than the public (5829 vs. 2200 as of 9/24/2025) **.
+
+For this report, we "de-duplicated" the internal dataset with the goal of obtaining a set of "case-person" records equivalent to the public dataset.  **This reduced the number of records in the internal dataset down from 5829 to 3931.**  The de-duplicated internal dataset still has more records than the public dataset because it includes cases that are in the Intake process.
+
+____
+
+# Case Status {.tabset}
+
+## Summary
+```{r status3.overall, message=F, warning=FALSE}
+
+tab <- cjtc %>%
+  group_by(Status = as.character(status3)) %>%
+  summarize(Number = n()) %>%
+  mutate(Percent = Number/sum(Number),
+         index = if_else(is.na(Status), -1, rank(Number)),
+         Status = replace_na(Status, "Missing")
+         ) %>%
+  arrange(desc(index)) %>%
+  select(-index) %>%
+
+  bind_rows(data.frame(Status ="Total",
+                       Number = sum(.$Number),
+                       Percent = sum(.$Percent))) %>%
+  mutate(Percent = scales::percent(Percent, acc=.1))
+
+tab %>%  
+  kbl(caption = "Case Status:  all cases",
+      align = "lrr") %>%
+  kable_styling(bootstrap_options = "striped") %>%
+  row_spec(which(tab$Status == "Missing"), italic=T) %>%
+  row_spec(which(tab$Status == "Total"), bold=T) 
+
+  
+```
+
+## By period
+
+```{r status.period, message=F, warning=FALSE}
+
+p <- ggplot(cjtc %>% filter(!is.na(status3))) +
+  
+  aes(x=period_r, 
+      group=status3, fill=status3) + 
+  
+  geom_bar(alpha = 0.7, color="grey") +
+  
+  scale_fill_brewer(palette = "Spectral") +
+  
+  labs(title = "Case status by period received",
+       x = "Period Received",
+       y = "Number of cases",
+       fill = "Status")
+
+ggplotly(p, tooltip = c("count", "group")) #%>% reverse_legend_labels()
+
+```
+
+## Detailed CJTC coding
+```{r status.overall, message=F, warning=FALSE}
+
+tab <- cjtc %>%
+  group_by(Status = as.character(status)) %>%
+  summarize(Number = n()) %>%
+  mutate(Percent = Number/sum(Number),
+         index = if_else(is.na(Status), -1, rank(Number)),
+         Status = replace_na(Status, "Missing")
+         ) %>%
+  arrange(desc(index)) %>%
+  select(-index) %>%
+
+  bind_rows(data.frame(Status ="Total",
+                       Number = sum(.$Number),
+                       Percent = sum(.$Percent))) %>%
+  mutate(Percent = scales::percent(Percent, acc=.1)) 
+  
+tab %>% 
+  kbl(caption = "Case Status (original detail):  all cases",
+      align = "lrr") %>%
+  kable_styling(bootstrap_options = "striped") %>%
+  row_spec(which(tab$Status == "Missing"), italic=T) %>%
+  row_spec(which(tab$Status == "Total"), bold=T) 
+
+
+```
+
+
+____
+
+# Outcomes {.tabset}
+
+In this section we restrict the focus to closed cases, and their results.
+
+## Overall {.tabset}
+
+### Summary
+```{r outcome.summary, message=F, warning=FALSE}
+
+tab <- cjtc %>%
+  filter(status3 == "Closed") %>%
+  group_by(Outcome = as.character(outcat)) %>%
+  summarize(Number = n()) %>%
+  mutate(Percent = Number/sum(Number),
+         index = if_else(is.na(Outcome), -1, rank(Number)),
+         Outcome = replace_na(Outcome, "Missing")
+         ) %>%
+  arrange(desc(index)) %>%
+  select(-index) %>%
+
+  bind_rows(data.frame(Outcome ="Total",
+                       Number = sum(.$Number),
+                       Percent = sum(.$Percent))) %>%
+  mutate(Percent = scales::percent(Percent, acc=.1)) 
+  
+tab %>%
+  kbl(caption = "Case Outcome:  all closed cases",
+      align = "lrr") %>%
+  kable_styling(bootstrap_options = "striped") %>%
+  row_spec(which(tab$Outcome == "Missing"), italic=T) %>%
+  row_spec(which(tab$Outcome == "Total"), bold=T) 
+  
+```
+
+### Original CJTC detail
+
+```{r outcome.detail, message=F, warning=FALSE}
+
+tab <- cjtc %>%
+  filter(status3 == "Closed") %>%
+  mutate(case_determination = if_else(status3 != "Closed", "Still Open", case_determination)) %>%
+  group_by(Outcome = as.character(case_determination)) %>%
+  summarize(Number = n()) %>%
+  mutate(Percent = Number/sum(Number),
+         index = if_else(is.na(Outcome), -1, rank(Number)),
+         Outcome = replace_na(Outcome, "Missing")
+         ) %>%
+  arrange(desc(index)) %>%
+  select(-index) %>%
+
+  bind_rows(data.frame(Outcome ="Total",
+                       Number = sum(.$Number),
+                       Percent = sum(.$Percent))) %>%
+  mutate(Percent = scales::percent(Percent, acc=.1)) #%>%
+
+tab %>%    
+  kbl(caption = "Case Outcome (original detail):  all cases",
+      align = "lrr") %>%
+  kable_styling(bootstrap_options = "striped") %>%
+  row_spec(which(tab$Outcome == "Missing"), italic=T) %>%
+  row_spec(which(tab$Outcome == "Total"), bold=T) 
+```
+
+## By period received
+
+```{r outcome.period, message=F, warning=FALSE}
+
+p <- ggplot(cjtc %>% filter(status3 == "Closed" & outcat != "Other"), 
+          aes(x=period_r, group=desc(outcat), 
+              fill=outcat)) + 
+  
+  geom_bar(alpha = 0.7, color="grey") +
+  
+  scale_fill_brewer(palette = "Spectral") +
+  
+  labs(title = "Closed case outcome by period received",
+       x = "Period Received",
+       y = "Number of closed cases",
+       fill = "Outcome")
+
+ggplotly(p, tooltip= c("count", "fill")) %>% reverse_legend_labels()
+
+```
+
+
+## By year - recd post 5051
+
+```{r outcomes.post, message=F, warning=FALSE}
+
+xval = max(cjtc$yr_r)
+yval = nrow(cjtc %>% filter(yr_r == max(cjtc$yr_r) & 
+                              period_r != "pre.5051" & 
+                              status3 == "Closed")) * 1.2
+
+p <- ggplot(cjtc %>% filter(period_r != "pre.5051" & status3 == "Closed"), 
+          aes(x=yr_r, group=desc(outcat), 
+              fill=outcat)) + 
+  
+  geom_bar(alpha = 0.7, color="grey") +
+  
+  scale_fill_brewer(palette = "Spectral") +
+  
+  annotate("text", x=xval, y=yval, label= "Yr to date", size=3) +
+  
+  labs(title = "Closed case outcomes by year received (post-5051)",
+       x = "Year received",
+       y = "Number of closed cases",
+       fill = "Outcome")
+
+ggplotly(p, tooltip= c("count", "fill")) %>% reverse_legend_labels()
+
+  
+```
+
+
+
+____
+
+# Processing time {.tabset}
+
+## By status and period
+
+The "boxplots" below show the range of case processing times (in years) by period, separately for closed and still open cases.  For closed cases, this is the difference between case date received and date closed.  For open cases it is the difference between case date received and the current date.
+
+* The box shows the middle 50% of the processing times, with a line at the median.
+* The "whiskers" extend to roughly the lower 5% and upper 95% of processing times.
+* Any dots beyond the whiskers are cases with unusually low or high processing times.
+* The width of the box represents the number of cases in that group.
+
+```{r, case.duration, message=F, warning=F}
+ggplot(cjtc %>% filter(!is.na(status3) & case_length_yr >= 0) %>%
+         mutate(status2 = if_else(status3=="Closed", "Closed", "Open")), 
+       aes(x=period_r, y=case_length_yr, fill=period_r)) +
+  geom_boxplot(alpha = 0.5, varwidth = T) +
+  
+  labs(title = "Case processing times by case status and period received",
+       x = "Period received",
+       y = "Time in years",
+       fill = "Period received") +
+  
+  scale_y_continuous(breaks = seq(0,round(max(cjtc$case_length_yr)), 1)) +
+
+  facet_wrap("status2")
+
+```
+
+## Post 5051 {.tabset}
+
+
+### Closed cases: By outcome
+
+```{r, case.duration.outcome, message=F, warning=F}
+ggplot(cjtc %>% filter(period_r != "pre.5051" & status3 == "Closed" & case_length_yr >= 0), 
+       aes(x=period_r, y=case_length_yr, fill=period_r)) +
+  geom_boxplot(alpha = 0.5, varwidth = T) +
+  
+  labs(title = "Closed case processing times by outcome and period received",
+       x = "Period received",
+       y = "Time to close in years",
+       fill = "Period received") +
+
+  facet_wrap("outcat")
+
+```
+
+### Open cases: By status
+
+```{r, case.age.status, message=F, warning=F}
+ggplot(cjtc %>% 
+         filter(period_r != "pre.5051" & status3 != "Closed" & case_length_yr >= 0) %>%
+         mutate(Status = if_else(grepl("Intake", status), status, "Investigation")), 
+       aes(x=period_r, y=case_length_yr, fill=period_r)) +
+  geom_boxplot(alpha = 0.5, varwidth = T) +
+  
+  labs(title = "Open case processing times by status and period received",
+       x = "Period received",
+       y = "Time since received in years",
+       fill = "Period received") +
+
+  facet_wrap("Status")
+
+```
+____
+
+## Caseload dynamics over time {.tabset}
+
+```{r throughput.df, message=F, warning=F}
+rcd <- cjtc %>% 
+  group_by(yr_mo = yr_mo_r) %>%
+  summarize(received = n())
+
+clo <- cjtc %>% 
+  group_by(yr_mo = yr_mo_c) %>%
+  summarize(closed = n())
+
+# index_all defined in top code block
+monthly_df <- left_join(index_all, rcd) %>%
+  left_join(clo) %>%
+  arrange(seqnum) %>%
+  mutate(across(c(received,closed), ~tidyr::replace_na(.x, 0)),
+         net_number = closed - received,
+         net_pct = 100*(closed/received -1),
+         in_out_ratio = round(received/closed, 2),
+         cumulative_backlog = -cumsum(net_number)) 
+
+
+```
+
+In the post-5051 period, there has been a steady growth in the size of the open caseload, and as the [Case Status](#status) section showed, most of these case are in the "Intake" part of the process, not in active investigation.  The graphs in the tabs below show the trend in the size of the open caseload in different ways.
+
+### Received vs. Closed
+
+This plot shows the number of cases received and the number of cases closed each month.  It does a good job identifying the overall volume of cases and the steep increase in cases received post 5051, but not as good a job identifying the relative number of cases received vs. closed.  For that, the other tabs in this section are better.
+
+```{r recv.clos, message=F, warning=F}
+
+p <- monthly_df %>% 
+  select(seqnum, yr_mo, received, closed) %>%
+  pivot_longer(cols = c(received:closed),
+               names_to = "Measure",
+               values_to = "num") %>%
+  
+  ggplot(aes(x=seqnum, y=num, group=Measure, color=Measure)) +
+  
+  geom_point(alpha = 0.7, size = 1) +
+  geom_line(alpha = 0.5) +
+  
+  labs(title = "Number of cases received and closed by month",
+       x = "Year",
+       y = "Number of cases") +
+  
+  scale_x_continuous(
+    breaks = seq(1, nrow(monthly_df), 12),
+    label = as.character(2002:2025) # monthly_df$yr_mo[seq(1, nrow(monthly_df), 12)]
+  )  +
+  
+  theme(axis.text.x = element_text(size = 5))
+  
+ggplotly(p, tooltip= c("color", "num")) %>%
+  reverse_legend_labels()
+```
+
+____
+
+### Ratio of cases received:closed
+
+This plot shows the ratio of cases received to closed each month (the points), with a smoothed line showing the moving average over time (the gray band around the line measures the uncertainty in the average). 
+
+A value of 1 (on the y-axis) means the two numbers are equal, and this is highlighted in the plot by the gray horizontal line.  Values below that line mean more cases are closed than received; values above that line mean more cases are received than closed.  A value of 0.5, for example, would mean that the number of received cases was half as large as the number of closed cases.  While a value of 5 would mean the number of received cases was 5 times as large. 
+
+The 3 periods are represented by the colors of the lines/points.
+
+Overall, the smoothed ratios indicate more cases received than closed for much of the time, but the average ratios rise post-5051:
+
+* pre-5051 average:  `r monthly_df %>% filter(period == "pre.5051" & in_out_ratio != Inf) %>% summarize(mean = round(mean(in_out_ratio, na.rm=T), 1))`
+
+* interim average:  `r monthly_df %>% filter(period == "interim" & in_out_ratio != Inf) %>% summarize(mean = round(mean(in_out_ratio, na.rm=T), 1))`
+
+* current average: `r monthly_df %>% filter(period == "current" & in_out_ratio != Inf) %>% summarize(mean = round(mean(in_out_ratio, na.rm=T), 1))`
+
+
+```{r in.out.ratio, message=F, warning=F}
+
+p <- monthly_df %>% 
+  select(seqnum, yr_mo, period, in_out_ratio) %>%
+  
+  ggplot(aes(x=seqnum, y=in_out_ratio, color=period, label=yr_mo)) +
+  
+  geom_smooth() +
+  geom_point(alpha = 0.5) +
+  geom_hline(yintercept = 1, color = "darkgrey") +
+  
+  labs(title = "Ratio of cases received to cases closed by month",
+       x = "Year",
+       y = "Ratio of cases received:closed") +
+  
+  scale_x_continuous(
+    breaks = seq(1, nrow(monthly_df), 12),
+    label = as.character(2002:2025) # monthly_df$yr_mo[seq(1, nrow(monthly_df), 12)]
+  )  +
+
+  coord_cartesian(ylim = c(0, NA)) +
+  
+  theme(axis.text.x = element_text(size = 5))
+
+ggplotly(p, tooltip= c("yr_mo", "color", "in_out_ratio"))
+```
+
+____
+
+### Monthly net throughput
+
+This graph shows monthly throughput as the difference between the number of cases received vs. closed -- a negative or positive value.  Negative values represent months where more cases came in than were closed.  Positive represents months with more closures than incoming.
+
+```{r throughput, message=F, warning=F}
+
+p <- monthly_df %>% 
+  mutate(posneg = if_else(net_number >= 0, "positive", "negative")) %>%
+ 
+  ggplot(aes(x=seqnum, y=net_number, fill=posneg)) +
+  
+  geom_bar(stat = "identity",
+           #fill = "blue",
+           alpha = 0.7) +
+  
+  labs(title = "Net throughput: cases closed - cases received by month",
+       x = "Year",
+       y = "Net number of cases",
+       fill = "Net throughput") +
+  
+  scale_x_continuous(
+    breaks = seq(1, nrow(monthly_df), 12),
+    label = as.character(2002:2025)
+  )  +
+  
+  theme(axis.text.x = element_text(size = 5))
+  
+ggplotly(p, tooltip="net_number")
+```
+
+### Cumulative open caseload {.tabset}
+
+This shows the growth in the monthly number of open cases (intake + active investigation) over time.
+
+#### All cases
+```{r cum.open, message=F, warning=F}
+
+p <- monthly_df %>% 
+
+  ggplot(aes(x=seqnum, y=cumulative_backlog)) +
+  
+  geom_line(stat = "identity",
+            color = "grey") +
+  geom_point(stat = "identity",
+             color = "blue",
+             alpha = 0.7,
+             size = 1) +
+  
+  labs(title = "Cumulative open caseload by month",
+       x = "Year",
+       y = "Number of open cases") +
+  
+  scale_x_continuous(
+    breaks = seq(1, nrow(monthly_df), 12),
+    label = as.character(2002:2025)
+  )  +
+  
+  theme(axis.text.x = element_text(size = 5))
+  
+ggplotly(p, tooltip="cumulative_backlog")
+```
+
+
+#### Post 5051
+```{r cum.open.p5051, message=F, warning=F}
+
+    # date_received < as.Date("2021-06-20") ~ "pre.5051",
+    # date_received > as.Date("2022-06-30") ~ "current",
+
+p <- monthly_df %>% filter(yr_mo > "2021-6") %>%
+
+  ggplot(aes(x=seqnum, y=cumulative_backlog)) +
+  
+  geom_line(stat = "identity",
+            color = "grey") +
+  geom_point(stat = "identity",
+             color = "blue",
+             alpha = 0.7,
+             size = 1) +
+  
+  geom_vline(xintercept = monthly_df$seqnum[monthly_df$yr_mo == "2022-7"],
+             color = "darkgrey") +
+  
+  annotate("text",
+           x = monthly_df$seqnum[monthly_df$yr_mo == "2022-1"],
+           y = max(monthly_df$cumulative_backlog),
+           label = "Interim period", size = 3) +
+
+    annotate("text",
+           x = monthly_df$seqnum[monthly_df$yr_mo == "2024-1"],
+           y = max(monthly_df$cumulative_backlog),
+           label = "Current period", size = 3) +
+  
+  labs(title = "Cumulative open caseload by month - post 5051",
+       x = "Year",
+       y = "Number of open cases") +
+  
+  scale_x_continuous(
+    breaks = seq(1, nrow(monthly_df), 12),
+    label = as.character(2002:2025)
+  )  +
+  
+  theme(axis.text.x = element_text(size = 5))
+  
+ggplotly(p, tooltip = "cumulative_backlog")
+```
+
+# Source of complaint {.tabset}
+
+## Overall
+
+```{r source, message=F, warning=FALSE}
+
+  tab <- cjtc %>%
+  group_by(Source = opened_reason) %>%
+  summarize(Number = n()) %>%
+  mutate(Percent = Number/sum(Number),
+         index = if_else(is.na(Source), -1, rank(Number)),
+         Source = replace_na(Source, "Missing")
+         ) %>%
+  arrange(desc(index)) %>%
+  select(-index) %>%
+
+  bind_rows(data.frame(Source ="Total",
+                       Number = sum(.$Number),
+                       Percent = sum(.$Percent))) %>%
+  mutate(Percent = scales::percent(Percent, acc=.1))
+
+tab %>%  
+  kbl(caption = "Case Source:  all cases",
+      align = "lrr") %>%
+  kable_styling(bootstrap_options = "striped") %>%
+  row_spec(which(tab$Source == "Missing"), italic=T) %>%
+  row_spec(which(tab$Source == "Total"), bold=T) 
+
+```
+
+## Post 5051
+
+```{r source.post, message=F, warning=FALSE}
+
+tab <- cjtc %>%
+  filter(period_r != "pre.5051") %>%
+  group_by(Source = opened_reason) %>%
+  summarize(Number = n()) %>%
+  mutate(Percent = Number/sum(Number),
+         index = if_else(is.na(Source), -1, rank(Number)),
+         Source = replace_na(Source, "Missing")
+         ) %>%
+  arrange(desc(index)) %>%
+  select(-index) %>%
+
+  bind_rows(data.frame(Source ="Total",
+                       Number = sum(.$Number),
+                       Percent = sum(.$Percent))) %>%
+  mutate(Percent = scales::percent(Percent, acc=.1))
+
+tab %>%  
+  kbl(caption = "Case Source:  post 5051",
+      align = "lrr") %>%
+  kable_styling(bootstrap_options = "striped") %>%
+  row_spec(which(tab$Source == "Missing"), italic=T) %>%
+  row_spec(which(tab$Source == "Total"), bold=T) 
+
+
+```
+
+____
+
+# Conduct investigated {.tabset}
+
+Offenses are designated by the RCW that applies, and are coded by CJTC staff during the intake review process.  Pre-5051 offenses are coded with a wide range of RCWs.  Post-5051, cases are coded by the RCW section added by 5051 (43.101.105) and  classified into 2 categories: mandatory vs. discretionary decertification, if sustained.  In addition, CJTC has proposed a priority ranking for each offense to help triage the existing caseload.
+
+Conduct investigated can be tabulated by the offenses charged, or by the case.  Both are shown in this section.
+
+## By offense {.tabset}
+
+The tables in this subsection count the number of times each offense appears in the certification database.  The total number of offenses does not track the total number of cases, because a single subject may have committed several alleged offenses, and because most cases in intake status have not yet been assigned an offense.  So the tables below are best used to understand what types of offenses are commonly found in the data.  The full list of offenses is found on the "Original CJTC" tab.
+
+### By period received
+```{r offense.period, message=F, warning=FALSE}
+
+tab <- offense_list_internal %>%
+  group_by(Period = period_r) %>%
+  summarize(Number = n()) %>%
+  mutate(Percent = Number/sum(Number)) %>%
+  #arrange(desc(Number)) %>%
+
+  bind_rows(data.frame(Period ="Total",
+                       Number = sum(.$Number),
+                       Percent = sum(.$Percent))) %>%
+  mutate(Percent = scales::percent(Percent, acc=.1))
+  
+tab %>%
+  kbl(caption = "Number of offenses by period",
+      align = "lrr") %>%
+  kable_styling(bootstrap_options = "striped") %>%
+  row_spec(which(tab$Period == "Total"), bold=T) 
+```
+
+### Classification
+
+Offenses are only classified into mandatory vs. discretionary for post-5051 cases, so we exclude the offenses found in the pre-5051 period.  There are still a few missing cases, when the RCW listed is not from RCW section 43.101.105.
+
+```{r offense.class, message=F, warning=FALSE}
+
+tab <- offense_list_internal %>%
+  filter(period_r != "pre.5051") %>%
+  group_by(Classification = offense_classification) %>%
+  summarize(Number = n()) %>%
+  mutate(Percent = Number/nrow(offense_list_internal)) %>%
+  #arrange(desc(Number)) %>%
+
+  bind_rows(data.frame(Classification ="Total",
+                       Number = sum(.$Number),
+                       Percent = sum(.$Percent))) %>%
+  mutate(Percent = scales::percent(Percent, acc=.1))
+  
+tab %>%
+  kbl(caption = "Classification of Offense",
+      align = "lrr") %>%
+  kable_styling(bootstrap_options = "striped") %>%
+  row_spec(which(tab$Classification == "Not classified"), italic=T) %>%
+  row_spec(which(tab$Classification == "Total"), bold=T) 
+```
+
+
+### Priority ranking {.tabset}
+
+The proposed priority ranking of an offense depends on the employment status of the offender.  CJTC staff have proposed priority ranks for all of the RCW offense categories established by 5051, except for two: voluntary surrender of certification and separated for misconduct.  These cases are defined by RCW and appear in the dataset, so we include them in the table:
+
+* 43.101.105(k) "Has been suspended or discharged, has resigned or retired in lieu of discharge, or has separated from the agency after the alleged misconduct occurred, for any conduct listed in this section"
+
+* 43.101.105(l) "Has voluntarily surrendered the person's certification as a peace officer or corrections officer.". 
+
+Here again, offenses are only ranked for post-5051 cases, so we exclude the offenses found in the pre-5051 period.
+
+#### Employed
+```{r offense.priority.emp, message=F, warning=FALSE}
+
+tab <- offense_list_internal %>%
+  filter(period_r != "pre.5051") %>%
+  mutate(
+    Offense_priority = factor(
+      case_when(
+        is.na(offense_priority_emp) ~ "Not ranked",
+        offense_priority_emp < 4 ~ as.character(offense_priority_emp),
+        offense_priority_emp == 4 ~ "Separated for misconduct",
+        offense_priority_emp == 5 ~ "Surrendered certification")),
+    Offense_priority = fct_relevel(Offense_priority, "Not ranked", after = Inf )
+  ) %>%
+  group_by(Priority = Offense_priority) %>%
+  summarize(Number = n()) %>%
+  mutate(Percent = Number/sum(Number)) %>%
+  #arrange(desc(Number)) %>%
+
+  bind_rows(data.frame(Priority ="Total",
+                       Number = sum(.$Number),
+                       Percent = sum(.$Percent))) %>%
+  mutate(Percent = scales::percent(Percent, acc=.1))
+  
+tab %>%
+  kbl(caption = "Offense Priority: Employed",
+      align = "lrr") %>%
+  kable_styling(bootstrap_options = "striped") %>%
+  row_spec(which(tab$Priority == "Not ranked"), italic=T) %>%
+  row_spec(which(tab$Priority == "Total"), bold=T)
+
+```
+
+
+#### Separated
+```{r offense.priority.sep, message=F, warning=FALSE}
+
+tab <- offense_list_internal %>%
+  filter(period_r != "pre.5051") %>%
+  mutate(
+    Offense_priority = factor(
+      case_when(
+        is.na(offense_priority_sep) ~ "Not ranked",
+        offense_priority_sep < 4 ~ as.character(offense_priority_sep),
+        offense_priority_sep == 4 ~ "Separated for misconduct",
+        offense_priority_sep == 5 ~ "Surrendered certification")),
+    Offense_priority = fct_relevel(Offense_priority, "Not ranked", after = Inf )
+  ) %>%
+  group_by(Priority = Offense_priority) %>%
+  summarize(Number = n()) %>%
+  mutate(Percent = Number/sum(Number)) %>%
+  #arrange(desc(Number)) %>%
+
+  bind_rows(data.frame(Priority ="Total",
+                       Number = sum(.$Number),
+                       Percent = sum(.$Percent))) %>%
+  mutate(Percent = scales::percent(Percent, acc=.1))
+  
+tab %>%
+  kbl(caption = "Offense Priority: Separated",
+      align = "lrr") %>%
+  kable_styling(bootstrap_options = "striped") %>%
+    row_spec(which(tab$Priority == "Not ranked"), italic=T) %>%
+  row_spec(which(tab$Priority == "Total"), bold=T)
+
+```
+
+### Original CJTC RCW code
+
+* Offenses defined by 5051 will begin with RCW 43.101.105
+* When a description of the RCW has been included in the data, we include it in the table.
+
+```{r conduct, message=F, warning=FALSE}
+
+tab <- offense_list_internal %>%
+
+  group_by(RCW=offense_rcw, Description=offense_desc) %>%
+  summarize(Number = n()) %>%
+  mutate(Percent = Number/nrow(offense_list_internal)) %>%
+  arrange(desc(Number)) %>%
+
+  bind_rows(data.frame(RCW ="Total",
+                       Number = sum(.$Number),
+                       Percent = sum(.$Percent))) %>%
+  mutate(Percent = scales::percent(Percent, acc=.1))
+
+tab %>%  
+  kbl(caption = "Offense investigated",
+      align = "llrr") %>%
+  kable_styling(bootstrap_options = "striped") %>%
+  row_spec(which(tab$RCW == "Total"), bold=T)
+
+```
+
+____
+
+## By case {.tabset}
+
+In this subsection we examine offenses by case.  Multiple offenses may be coded for each case (officers may also have multiple cases in the dataset, that is a different issue and is covered [in the last section of the report](#officers)).  So classification and ranking work a bit differently.
+
+Perhaps the most important feature, however, is the number of cases that have no data on offense:  over 80%.  We show how this varies by period and status first.
+
+### Missing by period received
+
+This table is useful for understanding how many cases are missing offense data.
+
+```{r missing.period, message=F, warning=FALSE}
+
+tab <- cjtc %>%
+  group_by(Period = period_r) %>%
+  summarize(Number = n(),
+            Missing = sum(is.na(num_offenses))) %>%
+  mutate(Pct.Missing = Missing/Number) %>%
+  #arrange(desc(Number)) %>%
+
+  bind_rows(data.frame(Period ="Total",
+                       Number = sum(.$Number),
+                       Missing = sum(.$Missing),
+                       Pct.Missing = sum(.$Missing)/sum(.$Number))) %>%
+  mutate(Pct.Missing = scales::percent(Pct.Missing, acc=.1))
+  
+tab %>%
+  kbl(caption = "Missing offense data by period",
+      align = "lrrr") %>%
+  kable_styling(bootstrap_options = "striped") %>%
+  row_spec(which(tab$Period == "Total"), bold=T) 
+```
+### Missing by case status
+
+
+```{r missing.status, message=F, warning=FALSE}
+
+tab <- cjtc %>%
+  filter(!is.na(status3)) %>%
+  group_by(Status = status3) %>%
+  summarize(Number = n(),
+            Missing = sum(is.na(num_offenses))) %>%
+  mutate(Pct.Missing = Missing/Number) %>%
+  #arrange(desc(Number)) %>%
+
+  bind_rows(data.frame(Status ="Total",
+                       Number = sum(.$Number),
+                       Missing = sum(.$Missing),
+                       Pct.Missing = sum(.$Missing)/sum(.$Number))) %>%
+  mutate(Pct.Missing = scales::percent(Pct.Missing, acc=.1))
+  
+tab %>%
+  kbl(caption = "Missing offense data by case status",
+      align = "lrrr") %>%
+  kable_styling(bootstrap_options = "striped") %>%
+  row_spec(which(tab$Status == "Total"), bold=T) 
+```
+### Number of offenses
+
+We exclude the missing cases from this table.
+
+```{r num.offenses, message=F, warning=FALSE}
+
+tab <- cjtc %>%
+  filter(!is.na(num_offenses)) %>%
+  group_by(Number = num_offenses) %>%
+  summarize(Persons = n()) %>%
+  mutate(Number = if_else(is.na(Number), "Not coded", as.character(Number)),
+         Percent = Persons/sum(Persons)) %>%
+  #arrange(desc(Persons)) %>%
+
+  bind_rows(data.frame(Number ="Total",
+                       Persons = sum(.$Persons),
+                       Percent = sum(.$Percent))) %>%
+  mutate(Percent = scales::percent(Percent, acc=.1))
+  
+tab %>%
+  kbl(caption = "Number of Offenses",
+      align = "lrr") %>%
+  kable_styling(bootstrap_options = "striped") %>%
+  row_spec(which(tab$Number == "Not coded"), italic=T) %>%
+  row_spec(which(tab$Number == "Total"), bold=T) 
+
+```
+
+
+### Classification
+
+Since subjects can commit multiple offenses, with multiple classifications, here we identify those with at least one offense that would require mandatory decertification if sustained.
+
+We exclude both the pre-5051 cases (since these are not classified) and the missing cases from the table.
+
+```{r mandatory.subject, message=F, warning=FALSE}
+
+tab <- cjtc %>%
+  filter(!is.na(num_offenses) & period_r != "pre.5051") %>%
+  mutate(Classification = case_when(
+    num_mandatory_offenses > 0 ~ "At least one mandatory",
+    num_discretionary_offenses > 1 ~ "Multiple discretionary",
+    num_discretionary_offenses == 1 ~ "Single discretionary")
+    ) %>%
+
+  group_by(Classification) %>%
+  summarize(Number = n()) %>%
+  mutate(Percent = Number/sum(Number),
+         index = if_else(is.na(Classification), -1, rank(Number)),
+         Classification = replace_na(Classification, "Not classified")
+         ) %>%
+  arrange(desc(index)) %>%
+  select(-index) %>%
+
+  bind_rows(data.frame(Classification ="Total",
+                       Number = sum(.$Number),
+                       Percent = sum(.$Percent))) %>%
+  mutate(Percent = scales::percent(Percent, acc=.1))
+
+tab %>%  
+  kbl(caption = "Case classification at the officer level:  all cases",
+      align = "lrr") %>%
+  kable_styling(bootstrap_options = "striped") %>%
+  row_spec(which(tab$Classification == "Not classified"), italic=T) %>%
+  row_spec(which(tab$Classification == "Total"), bold=T)
+
+```
+
+### Priority ranking
+
+There does not seem to be a way to identify the current employment status of officer in the certification database.
+
+
+____
+
+# Documents {.tabset}
+
+The documents for each case provide critical information.  They are, however, often missing, even for closed cases.
+
+## All cases
+
+```{r docs.overall.tab, message=F, warning=FALSE}
+
+tab <- cjtc %>%
+
+  mutate(Available = if_else(is.na(url), "No", "Yes")
+         ) %>%
+  
+  group_by(Available) %>%
+  summarize(Number = n()) %>%
+  mutate(Percent = Number/sum(Number)) %>%
+  arrange(desc(Number)) %>%
+
+  bind_rows(data.frame(Available ="Total",
+                       Number = sum(.$Number),
+                       Percent = sum(.$Percent))) %>%
+  mutate(Percent = scales::percent(Percent, acc=.1)) 
+  
+tab %>% kbl(caption = "Documents available?",
+            align = "lrr") %>%
+  kable_styling(bootstrap_options = "striped") %>%
+  row_spec(which(tab$Available == "Missing"), italic=T) %>%
+  row_spec(which(tab$Available == "Total"), bold=T)
+
+```
+
+
+## By period
+```{r docs.period, message=F, warning=FALSE}
+
+p <- ggplot(cjtc %>% mutate(Documents = if_else(is.na(url), "No", "Yes")), 
+            aes(x=period_r, group=Documents, 
+                fill=Documents)) + 
+  
+  geom_bar(alpha = 0.7, color="grey") +
+  
+  scale_fill_brewer(palette = "Spectral") +
+  
+  labs(title = "Document availability by period received",
+       x = "Period Received",
+       y = "Number of cases",
+       fill = "Documents")
+
+ggplotly(p, tooltip= c("count", "group")) #%>% reverse_legend_labels()
+
+```
+
+
+## By status (recd post 5051)
+
+```{r docs.status, message=F, warning=FALSE}
+
+p <- ggplot(cjtc %>% 
+              filter(period_r != "pre.5051" & !is.na(status3)) %>%
+              mutate(Documents = if_else(is.na(url), "No", "Yes")), 
+            aes(x=status3, group=Documents, 
+                fill=Documents)) + 
+  
+  geom_bar(alpha = 0.7, color="grey") +
+  
+  scale_fill_brewer(palette = "Spectral") +
+  
+  labs(title = "Document availability by case status",
+       x = "Case status",
+       y = "Number of cases",
+       fill = "Documents")
+
+ggplotly(p, tooltip= c("count", "group")) #%>% reverse_legend_labels()
+
+```
+
+## Availability over time {.tabset}
+
+```{r docs.time.df, message=F, warning=F}
+closed_docs <- cjtc %>% 
+  filter(status3=="Closed" & period_r != "pre.5051") %>%
+  group_by(yr_mo = yr_mo_c) %>%
+  summarize(num = n(),
+            docs = sum(!is.na(url))) %>%
+  mutate(status = "Closed",
+         pct.docs = docs/num)
+
+investigation_docs <- cjtc %>% 
+  filter(grepl("investigation", status3) & period_r != "pre.5051") %>%
+  group_by(yr_mo = yr_mo_r) %>%
+  summarize(num = n(),
+            docs = sum(!is.na(url))) %>%
+  mutate(status = "Active investigation",
+         pct.docs = docs/num)
+
+
+monthly_df_closed <- left_join(index_post_5051, closed_docs) %>%
+  arrange(seqnum) %>%
+  mutate(across(num:docs, ~tidyr::replace_na(.x, 0)),
+         cumulative_closed = cumsum(num),
+         cumulative_docs = cumsum(docs),
+         cumulative_pct_docs = cumulative_docs/cumulative_closed)
+
+monthly_df_investigation <- left_join(index_post_5051, investigation_docs) %>%
+  arrange(seqnum) %>%
+  mutate(across(num:docs, ~tidyr::replace_na(.x, 0)),
+         cumulative_investigation = cumsum(num),
+         cumulative_docs = cumsum(docs),
+         cumulative_pct_docs = cumulative_docs/cumulative_investigation)
+
+```
+
+### Closed cases (closed post 5051)
+```{r closed.docs.p5051, message=F, warning=F, out.width="150%"}
+
+    # date_received < as.Date("2021-06-20") ~ "pre.5051",
+    # date_received > as.Date("2022-06-30") ~ "current",
+
+p1 <- monthly_df_closed %>%
+  pivot_longer(cols = cumulative_closed:cumulative_pct_docs,
+               names_to = "Measure",
+               values_to = "cumsum") %>%
+  filter(Measure != "cumulative_pct_docs") %>%
+  mutate(Measure = sub("cumulative_", "", Measure)) %>%
+
+  ggplot(aes(x=seqnum, y=cumsum, group=Measure, color=Measure)) +
+  
+  geom_line(stat = "identity") +
+  geom_point(stat = "identity",
+             alpha = 0.7,
+             size = 1) +
+  
+  geom_vline(xintercept = monthly_df_closed$seqnum[monthly_df_closed$yr_mo == "2022-7"],
+             color = "darkgrey") +
+  
+  annotate("text",
+           x = monthly_df_closed$seqnum[monthly_df_closed$yr_mo == "2022-1"],
+           y = max(monthly_df_closed$cumulative_closed),
+           label = "Interim", size = 3) +
+
+    annotate("text",
+           x = monthly_df_closed$seqnum[monthly_df_closed$yr_mo == "2024-1"],
+           y = max(monthly_df_closed$cumulative_closed),
+           label = "Current period", size = 3) +
+  
+  labs(title = "Cumulative closed cases and docs",
+       x = "Year closed",
+       y = "Number of cases") +
+  
+  scale_x_continuous(
+    breaks = seq(1, nrow(index_all), 12),
+    label = as.character(2002:2025)
+  ) +
+  
+  theme(text = element_text(size = 8))
+  
+p2 <- monthly_df_closed %>%
+
+  ggplot(aes(x=seqnum, y=100*cumulative_pct_docs)) +
+  
+  geom_bar(stat = "identity",
+           fill = "blue",
+           alpha = 0.7) +
+  
+  geom_vline(xintercept = monthly_df_closed$seqnum[monthly_df_closed$yr_mo == "2022-7"],
+             color = "darkgrey") +
+  
+  annotate("text",
+           x = monthly_df_closed$seqnum[monthly_df_closed$yr_mo == "2022-1"],
+           y = 100+5,
+           label = "Interim", size = 3) +
+
+    annotate("text",
+           x = monthly_df_closed$seqnum[monthly_df_closed$yr_mo == "2024-1"],
+           y = 100+5,
+           label = "Current period", size = 3) +
+  
+  labs(title = "Percent with documents",
+       x = "Year closed",
+       y = "Percent of cases") +
+  
+  scale_x_continuous(
+    breaks = seq(1, nrow(index_all), 12),
+    label = as.character(2002:2025)
+  ) +
+  
+  theme(text = element_text(size = 8))
+
+# p1plotly <- ggplotly(p1)
+# p2plotly <- ggplotly(p2)
+
+patchwork <- p1+p2+
+  plot_layout(widths = c(3, 4))
+patchwork + plot_annotation(
+  title = "Cases closed post-5051 and document availability",
+  subtitle = "By month closed") 
+
+```
+
+### Active investigation cases (recd post 5051)
+```{r investigation.docs.p5051, message=F, warning=F, , out.width="150%"}
+
+    # date_received < as.Date("2021-06-20") ~ "pre.5051",
+    # date_received > as.Date("2022-06-30") ~ "current",
+
+p1 <- monthly_df_investigation %>%
+  pivot_longer(cols = cumulative_investigation:cumulative_pct_docs,
+               names_to = "Measure",
+               values_to = "cumsum") %>%
+  filter(Measure != "cumulative_pct_docs") %>%
+  mutate(Measure = sub("cumulative_", "", Measure)) %>%
+
+  ggplot(aes(x=seqnum, y=cumsum, group=Measure, color=Measure)) +
+  
+  geom_line(stat = "identity") +
+  geom_point(stat = "identity",
+             alpha = 0.7,
+             size = 1) +
+  
+  geom_vline(xintercept = 
+               monthly_df_investigation$seqnum[monthly_df_investigation$yr_mo == "2022-7"],
+             color = "darkgrey") +
+  
+  annotate("text",
+           x = monthly_df_investigation$seqnum[monthly_df_investigation$yr_mo == "2022-1"],
+           y = max(monthly_df_investigation$cumulative_investigation),
+           label = "Interim", size = 3) +
+
+    annotate("text",
+           x = monthly_df_investigation$seqnum[monthly_df_investigation$yr_mo == "2024-1"],
+           y = max(monthly_df_investigation$cumulative_investigation),
+           label = "Current period", size = 3) +
+  
+  labs(title = "Cumulative cases and docs",
+       x = "Year received",
+       y = "Number of cases under investigation") +
+  
+  scale_x_continuous(
+    breaks = seq(1, nrow(index_all), 12),
+    label = as.character(2002:2025)
+  )+
+  
+  theme(text = element_text(size = 8))
+  
+p2 <- monthly_df_investigation %>%
+
+  ggplot(aes(x=seqnum, y=100*cumulative_pct_docs)) +
+  
+  geom_bar(stat = "identity",
+           fill = "blue",
+           alpha = 0.7) +
+  
+  geom_vline(xintercept = 
+               monthly_df_investigation$seqnum[monthly_df_investigation$yr_mo == "2022-7"],
+             color = "darkgrey") +
+  
+  annotate("text",
+           x = monthly_df_investigation$seqnum[monthly_df_investigation$yr_mo == "2022-1"],
+           y = 100+5,
+           label = "Interim", size = 3) +
+  
+  annotate("text",
+           x = monthly_df_investigation$seqnum[monthly_df_investigation$yr_mo == "2024-1"],
+           y = 100+5,
+           label = "Current period", size = 3) +
+  
+  labs(title = "Pct of cases with docs",
+       x = "Year Received",
+       y = "Percent of cases") +
+  
+  scale_x_continuous(
+    breaks = seq(1, nrow(index_all), 12),
+    label = as.character(2002:2025)
+  ) +
+  
+  theme(text = element_text(size = 8))
+
+patchwork <- p1+p2+
+  plot_layout(widths = c(3, 4))
+patchwork + plot_annotation(
+  title = "Active cases under investigation post-5051 and document availability",
+  subtitle = "By month received") 
+```
+
+____
+
+# Employers {.tabset}
+
+## Agency type {.tabset}
+
+### Overall
+
+```{r emp.type, message=F, warning=FALSE}
+
+tab <- cjtc %>%
+
+  group_by(Type = organization_type) %>%
+  summarize(Number = n()) %>%
+  mutate(Percent = Number/sum(Number),
+         index = if_else(is.na(Type), -1, rank(Number)),
+         Type = replace_na(Type, "Missing")
+         ) %>%
+  arrange(desc(index)) %>%
+  select(-index) %>%
+
+  bind_rows(data.frame(Type ="Total",
+                       Number = sum(.$Number),
+                       Percent = sum(.$Percent))) %>%
+  mutate(Percent = scales::percent(Percent, acc=.1))
+  
+tab %>%
+  kbl(caption = "Employer agency type",
+      align = "lrr") %>%
+  kable_styling(bootstrap_options = "striped") %>%
+  row_spec(which(tab$Type == "Missing"), italic=T) %>%
+  row_spec(which(tab$Type == "Total"), bold=T) 
+
+
+```
+
+### Post 5051
+
+```{r emp.type.post, message=F, warning=FALSE}
+
+tab <- cjtc %>%
+  filter(period_r != "pre.5051") %>%
+  
+  group_by(Type = organization_type) %>%
+  summarize(Number = n()) %>%
+  mutate(Percent = Number/sum(Number),
+         index = if_else(is.na(Type), -1, rank(Number)),
+         Type = replace_na(Type, "Missing")
+         ) %>%
+  arrange(desc(index)) %>%
+  select(-index) %>%
+
+  bind_rows(data.frame(Type ="Total",
+                       Number = sum(.$Number),
+                       Percent = sum(.$Percent))) %>%
+  mutate(Percent = scales::percent(Percent, acc=.1))
+  
+tab %>%
+  kbl(caption = "Employer agency type",
+      align = "lrr") %>%
+  kable_styling(bootstrap_options = "striped") %>%
+  row_spec(which(tab$Type == "Missing"), italic=T) %>%
+  row_spec(which(tab$Type == "Total"), bold=T) 
+```
+
+## Agency Name {.tabset}
+
+### Overall
+
+```{r emp.name, fig.height=7, message=F, warning=FALSE}
+
+tbl <- cjtc  %>%
+  filter(!is.na(agency)) %>%
+  
+  mutate(employer = gsub("County Sheriff's Office", "Cnty SO", agency),
+         employer = gsub("Police Department", "PD", employer)
+         ) %>%
+  
+  group_by(employer) %>%
+  summarise(Number = n()) %>%
+  mutate(Percent = Number/sum(Number)) %>%
+  arrange(Number) %>%
+  filter(Number > 19)
+
+ggplot(tbl,
+       aes(x = reorder(employer, Percent), y = Percent, 
+           label = Number)) +
+  geom_text(aes(y = Percent), size = 3, nudge_y = .002) +
+  geom_bar(stat="identity", fill="blue", alpha=.5) +
+  labs(title = "Cases by Employer: Agencies with 20+ cases",
+       caption = "CJTC certification database",
+       x = "",
+       y = "Percent of Total") +
+  
+  theme(axis.text.y = element_text(size=7)) +
+  
+  scale_y_continuous(labels = scales::percent_format(acc=1)) +
+  coord_flip()
+```
+
+### Post-5051
+
+```{r emp.name.post, fig.height=7, message=F, warning=FALSE}
+tbl2 <- cjtc  %>%
+  filter(period_r != "pre.5051") %>%
+  filter(!is.na(agency)) %>%
+  
+  mutate(employer = gsub("County Sheriff's Office", "Cnty SO", agency),
+         employer = gsub("Police Department", "PD", employer)
+         ) %>%
+  
+  group_by(employer) %>%
+  summarise(Number = n()) %>%
+  mutate(Percent = Number/sum(Number)) %>%
+  arrange(Number) %>%
+  filter(Number > 19)
+
+ggplot(tbl2,
+       aes(x = reorder(employer, Percent), y = Percent, 
+           label = Number)) +
+  geom_text(aes(y = Percent), size = 3, nudge_y = .002) +
+  geom_bar(stat="identity", fill="blue", alpha=.5) +
+  labs(title = "Cases by Employer post 5051: Agencies with 20+ cases",
+       caption = "CJTC certification database",
+       x = "",
+       y = "Percent of Total") +
+  
+  theme(axis.text.y = element_text(size=7)) +
+  
+  scale_y_continuous(labels = scales::percent_format(acc=1)) +
+  coord_flip()
+```
+
+____
+
+# Officers {.tabset}
+
+## Certification status
+
+```{r cert.status, message=F, warning=FALSE}
+
+tab <- cjtc %>%
+
+  group_by(Certification.status = certification_status) %>%
+  summarize(Number = n()) %>%
+  mutate(Percent = Number/sum(Number),
+         index = if_else(is.na(Certification.status), -1, rank(Number)),
+         Certification.status = replace_na(Certification.status, "Missing")
+         ) %>%
+  arrange(desc(index)) %>%
+  select(-index) %>%
+
+  bind_rows(data.frame(Certification.status ="Total",
+                       Number = sum(.$Number),
+                       Percent = sum(.$Percent))) %>%
+  mutate(Percent = scales::percent(Percent, acc=.1))
+
+tab %>%  
+  kbl(caption = "Certification status of subject:  all cases",
+      align = "lrr") %>%
+  kable_styling(bootstrap_options = "striped") %>%
+  row_spec(which(tab$Certification.status == "Missing"), italic=T) %>%
+  row_spec(which(tab$Certification.status == "Total"), bold=T)
+
+
+```
+
+____
+
+## Occupation type
+
+```{r occ.type, message=F, warning=FALSE}
+
+tab <- cjtc %>%
+
+  group_by(Occupation = occupation_type) %>%
+  summarize(Number = n()) %>%
+  mutate(Percent = Number/sum(Number),
+         index = if_else(is.na(Occupation), -1, rank(Number)),
+         Occupation = replace_na(Occupation, "Missing")
+         ) %>%
+  arrange(desc(index)) %>%
+  select(-index) %>%
+
+  bind_rows(data.frame(Occupation ="Total",
+                       Number = sum(.$Number),
+                       Percent = sum(.$Percent))) %>%
+  mutate(Percent = scales::percent(Percent, acc=.1))
+
+tab %>%  
+  kbl(caption = "Occupation type of subject:  all cases",
+      align = "lrr") %>%
+  kable_styling(bootstrap_options = "striped") %>%
+  row_spec(which(tab$Occupation == "Missing"), italic=T) %>%
+  row_spec(which(tab$Occupation == "Total"), bold=T)
+
+
+```
+
+____
+
+## Officers with multiple cases
+
+Here we pull out and list by name officers with more than one case in the database -- i.e., they have been the subject of multiple complaints and/or agency notifications of misconduct.  Note that when the name is missing in the database, we are unable to identify these officers.
+
+The information shown in the columns of the table for each officer is aggregated from all of their cases in the dataset; the list of distinct entries for each type of information is given, separated by ";".  The exception is the "outcomes" column -- here if their certification was revoked for any of their cases, we list just the revocation.
+
+The table is interactive:  data can be searched, sorted, filtered and downloaded using one of the buttons or boxes shown at the top of the table.
+
+```{r officers.all, message=F, warning=FALSE}
+cjtc_name <- cjtc %>%
+  filter(!is.na(first_name) & first_name != "Missing" &
+           !grepl("REDACT", first_name) & !grepl("Unknown", first_name) &
+           !is.na(last_name) & last_name != "Missing" & 
+           !grepl("REDACT", last_name) & !grepl("Complainant", first_name)) %>%
+  mutate(employer = gsub("County Sheriff's Office", "CSO", agency),
+         employer = gsub("Police Department", "PD", employer),
+         employer = gsub("Department of Corrections", "DOC", employer),
+         source = case_when(
+           grepl("1915", opened_reason) ~ "1915 report",
+           grepl("Request", opened_reason) ~ "Reinstate rqst",
+           grepl("Division", opened_reason) ~ "Division",
+           TRUE ~ opened_reason),
+         name = paste(last_name, first_name, sep=", ")
+           ) %>%
+  arrange(date_received) %>%
+  select(name, employer, source, date_received, status, case_determination, outcat) %>%
+  group_by(name) %>%
+  summarise(nrec = n(),
+            across(employer:outcat, ~paste(unique(.x), collapse="; ")), .groups = "drop") %>%
+  mutate(across(where(is.character), ~if_else(. == "NA", NA, .))) %>% # recover NAs 
+  mutate(outcat = gsub("Revoked\\/", "", outcat),
+         final_outcome = if_else(grepl("Revo", case_determination), "Cert Revoked", outcat))
+
+
+cjtc_name %>%
+  filter(nrec > 1) %>%
+  arrange(desc(nrec)) %>%
+  select(name, cases=nrec, sources=source, dates=date_received, employers=employer, 
+         statuses=status, outcomes=final_outcome) %>%
+  
+  DT::datatable(rownames = F,
+                caption = paste("Officers with more than one record in the database as of", 
+                                max(cjtc$date_received)),
+                filter = 'top',
+                escape = FALSE, 
+                extensions = 'Buttons', 
+                options = 
+                  list(dom = 'Bfrtip',
+                       buttons = c('copy', 'csv', 'excel', 'pdf', 'print'))
+  )
+
+
+  
+
+```
+
+____
+
+
+```{r missing.all, include=F, eval=F}
+
+temp <- cjtc %>%
+  select(last_name, agency, status, url) %>%
+  mutate(last_name = if_else(last_name == "Missing", NA, last_name))
+
+namevec <- names(temp)
+
+missing.table.all <- vector("list", length(namevec))
+for(i in 1:length(namevec)) {
+  missing.table.all[[i]] <- (table(is.na(temp[namevec[i]])))
+  names(missing.table.all) <- namevec
+}
+
+print(data.frame(do.call(rbind, missing.table.all)) %>% 
+        rename("Present" = "FALSE.", "Missing" = "TRUE."))
+
+```
+

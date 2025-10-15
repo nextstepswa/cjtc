@@ -1,0 +1,942 @@
+---
+title: "CJTC certification database"
+author: "Next Steps Washington"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+    includes:
+      in_header: gtag.cjtc_decert.html
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(kableExtra)
+library(ggplot2)
+library(plotly)
+#install.packages('RSocrata', repos ="https://chicago.r-universe.dev")
+library(RSocrata)
+
+# function for plotly https://stackoverflow.com/questions/59611914/reverse-the-legend-order-when-using-ggplotly
+reverse_legend_labels <- function(plotly_plot) {
+  n_labels <- length(plotly_plot$x$data)
+  plotly_plot$x$data[1:n_labels] <- plotly_plot$x$data[n_labels:1]
+  plotly_plot
+}
+
+options(knitr.kable.NA = '')
+
+```
+
+```{r data, message=F, warning=FALSE}
+load("Data/cjtc.rda")
+
+```
+
+# Introduction
+
+This report scrapes the data from the CJTC "Certification" database and presents some basic descriptive statistics.
+
+For some of the tables and plots we split the data into 3 periods by date received:
+
+* pre-5051 (before July 2021),  
+* "interim" (July 2021 - June 2022, a period when the new system was being set up), and  
+* "current" (after June 2022, when the system was fully functional)
+
+In other places, we combine the second two periods into "post-5051".
+
+This is a first draft, and comments/suggestions would be much appreciated.
+
+____
+
+# Year opened and closed {.tabset}
+
+## Opened {.tabset .tabset-pills}
+
+### Annual totals
+
+```{r yr.opened, message=F, warning=FALSE}
+p <- cjtc %>%
+  group_by(yr.r) %>%
+  summarize(Number = n()) %>%
+  mutate(Percent = Number/sum(Number)) %>%
+
+  ggplot(aes(x = yr.r, y = Number, text = scales::percent(Percent, acc=1))) +
+  geom_bar(stat="identity", fill="blue", alpha=0.7) +
+  
+  scale_x_continuous(breaks = unique(cjtc$yr.r),
+                     labels = unique(cjtc$yr.r)) +
+  
+  theme(axis.text.x = element_text(size=7)) +
+  
+  labs(title = "Year case received",
+       x = "Year received")
+  
+ggplotly(p, tooltip = "text")  
+
+```
+
+
+### Source of case
+
+```{r yr.opened.by.src, message=F, warning=FALSE}
+
+p <- cjtc %>%
+  mutate(yr.r.bc = ifelse(yr.r < 2021, 2020, yr.r)) %>%
+  group_by(yr.r.bc, Source = reason_for_opening_case) %>%
+  summarize(num = n()) %>%
+  group_by(yr.r.bc) %>%
+  mutate(pct.rcd = num/sum(num)) %>%
+
+  ggplot(aes(x = yr.r.bc, y = pct.rcd, 
+             group = Source, color=Source,
+             text = scales::percent(pct.rcd, acc=1))) +
+  geom_line(alpha=0.7) +
+  geom_point() +
+  geom_point(color="black", alpha=0.7, shape=21, show.legend=FALSE) +
+  
+  scale_y_continuous(labels = scales::percent_format(acc=1), limits = c(0, 1)) +
+  
+  theme(axis.text.x = element_text(size=7)) +
+  
+  labs(title = "Source of cases received by year",
+       x = "Year received",
+       y = "Percent of cases")
+  
+ggplotly(p, tooltip = "text")  
+
+```
+
+## Closed {.tabset .tabset-pills}
+
+### Annual totals
+
+```{r yr.closed, message=F, warning=FALSE}
+p <- cjtc %>%
+  group_by(yr.c) %>%
+  summarize(Number = n()) %>%
+  mutate(Percent = Number/sum(Number)) %>%
+
+  ggplot(aes(x = yr.c, y = Number, text = scales::percent(Percent, acc=1))) +
+  geom_bar(stat="identity", fill="blue", alpha=0.7) +
+  
+  scale_x_continuous(breaks = unique(cjtc$yr.c),
+                     labels = unique(cjtc$yr.c)) +
+  
+  theme(axis.text.x = element_text(size=7)) +
+  
+  labs(title = "Cases closed by year",
+       x = "Year closed")
+  
+ggplotly(p, tooltip = "text")  
+
+```
+
+
+
+## Percent Closed {.tabset}
+
+
+### By year
+
+```{r pct.closed.yr, message=F, warning=FALSE}
+
+df <- cjtc %>%
+  mutate(year = ifelse(date_received < as.Date("2021-07-25"),
+                       2020,
+                       yr.r)) %>%
+  group_by(year) %>%
+  summarise(
+    num = n(),
+    open = sum(status2 == "Open", na.rm=T),
+    closed = sum(status2 == "Closed", na.rm=T)
+  ) %>%
+  mutate(pct.closed = closed/num)
+
+brks <- unique(df$year)
+labs <- c("pre.5051", sort(unique(df$year))[-1])
+  
+p <- ggplot(df, aes(x = year, y = pct.closed)) +
+  
+  geom_line(col="blue", alpha=0.7) +
+  geom_point(alpha=0.5) +
+  
+  scale_y_continuous(labels = scales::percent_format(acc=1), limits = c(0, 1)) +
+  scale_x_continuous(breaks = brks,
+                   labels = labs) +
+  
+  labs(title = "Percent of cases closed by year received",
+       x = "Year",
+       y = "Percent closed")
+  
+
+ggplotly(p)
+  
+```
+
+
+### By period
+
+```{r pct.closed.period, message=F, warning=FALSE}
+
+df <- cjtc %>%
+
+  group_by(period.r) %>%
+  summarise(
+    num = n(),
+    open = sum(status2 == "Open", na.rm=T),
+    closed = sum(status2 == "Closed", na.rm=T)
+  ) %>%
+  mutate(pct.closed = closed/num)
+
+# brks <- unique(df$period)
+# labs <- c("pre.5051", sort(unique(df$year))[-1])
+  
+p <- ggplot(df, aes(x = period.r, y = pct.closed)) +
+  
+  # geom_line(col="blue", alpha=0.7) +
+  # geom_point(alpha=0.5) +
+  
+  geom_bar(stat="identity", fill="blue", alpha=0.6) +
+  
+  scale_y_continuous(labels = scales::percent_format(acc=1),
+                     limits = c(0,1)) +
+  
+  labs(title = "Percent of cases closed by period received",
+       x = "Period",
+       y = "Percent closed")
+  
+
+ggplotly(p)
+  
+```
+
+### By source of case and year received
+
+```{r yr.closed.by.src, message=F, warning=FALSE}
+
+df <- cjtc %>%
+    mutate(year = ifelse(date_received < as.Date("2021-07-25"),
+                       2020,
+                       yr.r)) %>%
+  group_by(year, Source = reason_for_opening_case) %>%
+  summarise(
+    num = n(),
+    open = sum(status2 == "Open", na.rm=T),
+    closed = sum(status2 == "Closed", na.rm=T)
+  ) %>%
+  group_by(year) %>%
+  mutate(pct.closed = closed/num)
+
+brks <- unique(df$year)
+labs <- c("pre-5051", sort(unique(df$year))[-1])
+
+p <- df %>%  ggplot(aes(x = year, y = pct.closed, 
+                        group = Source, color=Source,
+                        text = scales::percent(pct.closed, acc=1))) +
+  geom_line(alpha=0.7) +
+  geom_point() +
+  geom_point(color="black", alpha=0.7, shape=21, show.legend=FALSE) +
+  
+  scale_y_continuous(labels = scales::percent_format(acc=1), limits = c(0, 1)) +
+  scale_x_continuous(breaks = brks,
+                     labels = labs) +
+  
+  theme(axis.text.x = element_text(size=7)) +
+  
+  labs(title = "Percent of cases closed by source and year",
+       x = "Year received",
+       y = "Percent closed")
+  
+ggplotly(p, tooltip = "text")  
+
+```
+
+____
+
+# Status {.tabset}
+
+## Overall
+```{r status.overall, message=F, warning=FALSE}
+
+cjtc %>%
+  mutate(status = replace_na(as.character(status), "Missing status info")) %>%
+  group_by(status) %>%
+  summarize(Number = n()) %>%
+  mutate(Percent = Number/sum(Number)) %>%
+  arrange(desc(Number)) %>%
+
+  bind_rows(data.frame(status ="Total",
+                       Number = sum(.$Number),
+                       Percent = sum(.$Percent))) %>%
+  mutate(Percent = scales::percent(Percent, acc=.1)) %>%
+  
+  kbl(caption = "Case status",
+      align = "lrr") %>%
+  kable_styling(bootstrap_options = "striped") %>%
+  row_spec((length(unique(cjtc$status))+1), bold=T)
+
+```
+
+## By period
+
+```{r status.period, message=F, warning=FALSE}
+
+p <- ggplot(cjtc, 
+          aes(x=period.r, group=desc(status), 
+              fill=status)) + 
+  
+  geom_bar(alpha = 0.7, color="grey") +
+  
+  scale_fill_brewer(palette = "Spectral") +
+  
+  labs(title = "Case status by Period",
+       x = "Period",
+       y = "Number of cases",
+       fill = "Status")
+
+ggplotly(p) %>% reverse_legend_labels()
+
+```
+
+____
+
+# Outcomes {.tabset}
+
+## Overall
+
+```{r outcomes, message=F, warning=FALSE}
+
+cjtc %>%
+  mutate(outcome = ifelse(status2=="Open", "Still Open", case_determination),
+         outcome = fct_relevel(outcome, "Still Open", after = Inf)
+         ) %>%
+  group_by(period.r, outcome) %>%
+  summarize(num = n()) %>%
+  pivot_wider(names_from = period.r,
+              values_from = num) %>%
+  
+  arrange(outcome) %>%
+  
+  bind_rows(data.frame(outcome ="Total",
+           pre.5051 = sum(cjtc$period.r == "pre.5051"),
+           interim = sum(cjtc$period.r == "interim"),
+           current = sum(cjtc$period.r == "current"))) %>%
+
+  
+  kable(caption = "Outcomes by period.r") %>%
+  kable_styling(bootstrap_options = c("striped","hover")) %>%
+  
+  row_spec(length(unique(cjtc$case_determination)), italic=T) %>%
+  row_spec(length(unique(cjtc$case_determination))+1, bold=T)
+  
+```
+
+## Post 5051
+
+```{r outcomes.post, message=F, warning=FALSE}
+
+tab <- cjtc %>%
+  filter(period.r != "pre.5051") %>%
+  
+  mutate(outcome = ifelse(status2=="Open", "Still Open", case_determination),
+         outcome = replace_na(outcome, "Missing outcome info"),
+         # outcome = fct_relevel(outcome, "Still Open", after = Inf)
+         ) %>%
+  group_by(outcome) %>%
+  summarize(Number = n()) %>%
+  mutate(Percent = Number/sum(Number)) %>%
+  arrange(desc(Number)) %>%
+
+  bind_rows(data.frame(outcome ="Total",
+                       Number = sum(.$Number),
+                       Percent = sum(.$Percent))) %>%
+  mutate(Percent = scales::percent(Percent, acc=.1)) 
+
+  
+tab %>% kable(caption = "Outcomes post-5051",
+              digits = c(0,0,1),
+              align = "lrr") %>%
+  kable_styling(bootstrap_options = c("striped","hover")) %>%
+  
+  row_spec(nrow(tab)-1, italic=T) %>%
+  row_spec(nrow(tab), bold=T)
+  
+```
+
+
+## Over time
+
+Here we group the closure categories because some have very few cases while others are quite large.
+
+* Admin closure - for all reasons other than revoked and duplicate
+* Duplicate
+* Decline to charge
+* Dismiss charges / reinstate eligibility
+* Revocation (including admin closure due to revocation)
+* Other (all other outcome categories)
+* Open (case not yet closed)
+
+```{r yr.opened.over.time, message=F, warning=FALSE}
+
+df <- cjtc %>%
+  mutate(year = ifelse(date_received < as.Date("2021-07-25"),
+                       2020,
+                       yr.r)) %>%
+  group_by(year, Outcome=outcat) %>%
+  summarise(
+    num = n(),
+  ) %>%
+  group_by(year) %>%
+  mutate(pct.outcat = num/sum(num))
+
+brks <- unique(df$year)
+labs <- c("pre.5051", sort(unique(df$year))[-1])
+
+p <- df %>%
+  ggplot(aes(x = year, y = pct.outcat, 
+             group = Outcome, color=Outcome,
+             text = scales::percent(pct.outcat, acc=.1))) +
+  geom_line(alpha=0.7) +
+  geom_point() +
+  geom_point(color="black", alpha=0.7, shape=21, show.legend=FALSE) +
+  
+  scale_y_continuous(labels = scales::percent_format(acc=1), limits = c(0, 1)) +
+  
+  theme(axis.text.x = element_text(size=7)) +
+  
+  labs(title = "Source of cases received by year",
+       x = "Year received",
+       y = "Percent of cases")
+  
+ggplotly(p, tooltip = "text")  
+
+```
+
+____
+
+# Processing time {.tabset}
+
+## Open cases (time to date)
+
+```{r, case.age, message=F, warning=F}
+
+maxlen <- ceiling(max(cjtc$case.length.yr))
+
+ggplot(cjtc %>% filter(status != "Closed"), 
+       aes(x = period.r, y = case.length.yr)) +
+  
+  geom_dotplot(binaxis = "y", stackdir = "center", position = "dodge",
+               stackratio = 0.3, dotsize = 0.5, fill = "blue", alpha=0.1) +
+  
+  stat_summary(fun=mean, geom="point", shape=21,
+               fill="red", size=4) +
+  
+  scale_y_continuous(minor_breaks = seq(0, maxlen, 1), 
+                     breaks = seq(0, maxlen, 2)) +
+  
+  labs(title = "Open case length in years by period (red dot = mean)",
+       x = "Period",
+       y = "Years")
+
+
+```
+
+## Closed cases
+
+```{r, case.duration, message=F, warning=F}
+
+ggplot(cjtc %>% filter(status == "Closed"), 
+       aes(x = period.r, y = case.length.yr)) +
+  
+  geom_dotplot(binaxis = "y", stackdir = "center", position = "dodge",
+               stackratio = 0.3, dotsize = 0.5, fill = "blue", alpha=0.1) +
+  
+  stat_summary(fun=mean, geom="point", shape=21,
+               fill="red", size=4) +
+ 
+    scale_y_continuous(minor_breaks = seq(0, maxlen, 1), 
+                     breaks = seq(0, maxlen, 2)) +
+  
+  labs(title = "Closed case length in years by period (red dot = mean)",
+       x = "Period",
+       y = "Years")
+
+
+```
+
+____
+
+# Certification type
+
+```{r cert.type, message=F, warning=FALSE}
+
+cjtc %>%
+  mutate(certification_type = ifelse(certification_type=="", 
+                                     "Missing", certification_type)) %>%
+  
+  group_by(certification_type) %>%
+  summarize(Number = n()) %>%
+  mutate(Percent = Number/sum(Number)) %>%
+  arrange(desc(Number)) %>%
+
+  bind_rows(data.frame(certification_type ="Total",
+                       Number = sum(.$Number),
+                       Percent = sum(.$Percent))) %>%
+  mutate(Percent = scales::percent(Percent)) %>%
+  
+  kbl(caption = "Certification Type",
+      align = "lrr") %>%
+  kable_styling(bootstrap_options = "striped") %>%
+  row_spec(length(unique(cjtc$certification_type))+1, bold=T)
+
+```
+
+____
+
+# Source of complaint {.tabset}
+
+## Overall
+
+```{r source, message=F, warning=FALSE}
+cjtc %>%
+  mutate(reason_for_opening_case = ifelse(reason_for_opening_case=="", 
+                                          "Missing", reason_for_opening_case)) %>%
+  
+  group_by(reason_for_opening_case) %>%
+  summarize(Number = n()) %>%
+  mutate(Percent = Number/sum(Number)) %>%
+  arrange(desc(Number)) %>%
+
+  bind_rows(data.frame(reason_for_opening_case ="Total",
+                       Number = sum(.$Number),
+                       Percent = sum(.$Percent))) %>%
+  mutate(Percent = scales::percent(Percent, acc=.1)) %>%
+  
+  kbl(caption = "Case opened by:",
+      align = "lrr") %>%
+  kable_styling(bootstrap_options = "striped") %>%
+  row_spec(length(unique(cjtc$reason_for_opening_case))+1, bold=T)
+
+```
+
+## Post 5051
+
+```{r source.post, message=F, warning=FALSE}
+
+tab <- cjtc %>%
+  filter(period.r != "pre.5051") %>%
+  
+  mutate(reason_for_opening_case = ifelse(reason_for_opening_case=="", 
+                                          "Missing", reason_for_opening_case)) %>%
+  
+  group_by(reason_for_opening_case) %>%
+  summarize(Number = n()) %>%
+  mutate(Percent = Number/sum(Number)) %>%
+  arrange(desc(Number)) %>%
+
+  bind_rows(data.frame(reason_for_opening_case ="Total",
+                       Number = sum(.$Number),
+                       Percent = sum(.$Percent))) %>%
+  mutate(Percent = scales::percent(Percent, acc=.1))
+  
+tab %>%  kbl(caption = "Case opened by:",
+             align = "lrr") %>%
+  kable_styling(bootstrap_options = "striped") %>%
+  row_spec(nrow(tab), bold=T)
+
+```
+
+____
+
+# Conduct investigated {.tabset}
+
+## Overall
+
+```{r conduct, message=F, warning=FALSE}
+
+cjtc %>%
+  mutate(conduct_investigated = ifelse(conduct_investigated=="", 
+                                          "Missing", conduct_investigated)) %>%
+  
+  group_by(conduct_investigated) %>%
+  summarize(Number = n()) %>%
+  mutate(Percent = Number/sum(Number)) %>%
+  arrange(desc(Number)) %>%
+
+  bind_rows(data.frame(conduct_investigated ="Total",
+                       Number = sum(.$Number),
+                       Percent = sum(.$Percent))) %>%
+  mutate(Percent = scales::percent(Percent, acc=.1)) %>%
+  
+  kbl(caption = "Conduct investigated",
+      align = "lrr") %>%
+  kable_styling(bootstrap_options = "striped") %>%
+  row_spec(length(unique(cjtc$conduct_investigated))+1, bold=T)
+
+```
+
+
+## Post 5051
+
+```{r conduct.post, message=F, warning=FALSE}
+
+tab <- cjtc %>%
+  filter(period.r != "pre.5051") %>%
+  
+  mutate(conduct_investigated = ifelse(conduct_investigated=="", 
+                                          "Missing", conduct_investigated)) %>%
+  
+  group_by(conduct_investigated) %>%
+  summarize(Number = n()) %>%
+  mutate(Percent = Number/sum(Number)) %>%
+  arrange(desc(Number)) %>%
+
+  bind_rows(data.frame(conduct_investigated ="Total",
+                       Number = sum(.$Number),
+                       Percent = sum(.$Percent))) %>%
+  mutate(Percent = scales::percent(Percent, acc=.1))
+  
+
+tab %>% kbl(caption = "Conduct investigated",
+      align = "lrr") %>%
+  kable_styling(bootstrap_options = "striped") %>%
+  row_spec(nrow(tab), bold=T)
+
+```
+
+____
+
+# Documents {.tabset}
+
+## Overall {.tabset}
+
+### All cases
+
+```{r docs.overall.tab, message=F, warning=FALSE}
+
+tab <- cjtc %>%
+
+  mutate(documents = ifelse(documents_link=="", "No", "Yes")) %>%
+  
+  group_by(documents) %>%
+  summarize(Number = n()) %>%
+  mutate(Percent = Number/sum(Number)) %>%
+  arrange(desc(Number)) %>%
+
+  bind_rows(data.frame(documents ="Total",
+                       Number = sum(.$Number),
+                       Percent = sum(.$Percent))) %>%
+  mutate(Percent = scales::percent(Percent, acc=.1)) 
+  
+tab %>% kbl(caption = "Documents available?",
+            align = "lrr") %>%
+  kable_styling(bootstrap_options = "striped") %>%
+  row_spec(nrow(tab), bold=T)
+
+```
+
+### By status
+
+```{r docs.overall.by.status, message=F, warning=FALSE}
+
+p <- ggplot(cjtc %>%
+              mutate(documents = ifelse(documents_link=="", "No", "Yes")), 
+          aes(x=status, group=desc(documents), 
+              fill=documents)) + 
+  
+  geom_bar(alpha = 0.7, color="grey") +
+  
+  scale_fill_brewer(palette = "Spectral") +
+  
+  labs(title = "Documents by Status",
+       x = "Status",
+       y = "Number of cases",
+       fill = "Documents")
+
+ggplotly(p) %>% reverse_legend_labels()
+
+```
+
+
+## Post-5051 {.tabset}
+
+### All cases
+
+```{r docs.post, message=F, warning=FALSE}
+tab <- cjtc %>%
+  filter(period.r != "pre.5051") %>%
+  
+  mutate(documents = ifelse(documents_link=="", "No", "Yes")) %>%
+  
+  group_by(documents) %>%
+  summarize(Number = n()) %>%
+  mutate(Percent = Number/sum(Number)) %>%
+  arrange(desc(Number)) %>%
+
+  bind_rows(data.frame(documents ="Total",
+                       Number = sum(.$Number),
+                       Percent = sum(.$Percent))) %>%
+  mutate(Percent = scales::percent(Percent, acc=.1)) 
+  
+tab %>% kbl(caption = "Documents available?",
+            align = "lrr") %>%
+  kable_styling(bootstrap_options = "striped") %>%
+  row_spec(nrow(tab), bold=T)
+```
+
+### By status
+
+```{r docs.post.by.status, message=F, warning=FALSE}
+
+
+p <- ggplot(cjtc %>%
+              filter(period.r != "pre.5051") %>%
+              mutate(documents = ifelse(documents_link=="", "No", "Yes")), 
+          aes(x=status, group=desc(documents), 
+              fill=documents)) + 
+  
+  geom_bar(alpha = 0.7, color="grey") +
+  
+  scale_fill_brewer(palette = "Spectral") +
+  
+  labs(title = "Documents by Status: Post-5051",
+       x = "Status",
+       y = "Number of cases",
+       fill = "Documents")
+
+ggplotly(p) %>% reverse_legend_labels()
+
+```
+
+____
+
+# Employers {.tabset}
+
+## Agency type {.tabset}
+
+### Overall
+
+```{r emp.type, message=F, warning=FALSE}
+
+cjtc %>%
+  mutate(agency_type = ifelse(agency_type=="", "Missing", agency_type)) %>%
+  
+  group_by(agency_type) %>%
+  summarize(Number = n()) %>%
+  mutate(Percent = Number/sum(Number)) %>%
+  arrange(desc(Number)) %>%
+
+  bind_rows(data.frame(agency_type ="Total",
+                       Number = sum(.$Number),
+                       Percent = sum(.$Percent))) %>%
+  mutate(Percent = scales::percent(Percent)) %>%
+  
+  kbl(caption = "Case Determination",
+      align = "lrr") %>%
+  kable_styling(bootstrap_options = "striped") %>%
+  row_spec(length(unique(cjtc$agency_type))+1, bold=T)
+
+```
+
+### Post 5051
+
+```{r emp.type.post, message=F, warning=FALSE}
+cjtc %>%
+  filter(period.r != "pre.5051") %>%
+  
+  mutate(agency_type = ifelse(agency_type=="", "Missing", agency_type)) %>%
+  
+  group_by(agency_type) %>%
+  summarize(Number = n()) %>%
+  mutate(Percent = Number/sum(Number)) %>%
+  arrange(desc(Number)) %>%
+
+  bind_rows(data.frame(agency_type ="Total",
+                       Number = sum(.$Number),
+                       Percent = sum(.$Percent))) %>%
+  mutate(Percent = scales::percent(Percent)) %>%
+  
+  kbl(caption = "Case Determination",
+      align = "lrr") %>%
+  kable_styling(bootstrap_options = "striped") %>%
+  row_spec(length(unique(cjtc$agency_type))+1, bold=T)
+
+```
+
+## Agency Name {.tabset}
+
+### Overall
+
+```{r emp.name, fig.height=7, message=F, warning=FALSE}
+
+tbl <- cjtc  %>%
+  mutate(employer = ifelse(employer=="", "Missing", employer),
+         employer = gsub("County Sheriff's Office", "Cnty SO", employer)
+         ) %>%
+  
+  group_by(employer) %>%
+  summarise(Number = n()) %>%
+  mutate(Percent = Number/sum(Number)) %>%
+  arrange(Number) %>%
+  filter(Number > 4)
+
+ggplot(tbl,
+       aes(x = reorder(employer, Percent), y = Percent, 
+           label = Number)) +
+  geom_text(aes(y = Percent), size = 3, nudge_y = .003) +
+  geom_bar(stat="identity", fill="blue", alpha=.5) +
+  labs(title = "Cases by Employer: Agencies with 5 or more cases",
+       caption = "CJTC certification database",
+       x = "",
+       y = "Percent of Total") +
+  
+  theme(axis.text.y = element_text(size=7)) +
+  
+  scale_y_continuous(labels = scales::percent_format(acc=1)) +
+  coord_flip()
+```
+
+### Post-5051
+
+```{r emp.name.post, message=F, warning=FALSE}
+tbl <- cjtc  %>%
+  filter(period.r != "pre.5051") %>%
+  
+  mutate(employer = ifelse(employer=="", "Missing", employer),
+         employer = gsub("County Sheriff's Office", "Cnty SO", employer)
+         ) %>%
+  
+  group_by(employer) %>%
+  summarise(Number = n()) %>%
+  mutate(Percent = Number/sum(Number)) %>%
+  arrange(Number) %>%
+  filter(Number > 4)
+
+ggplot(tbl,
+       aes(x = reorder(employer, Percent), y = Percent, 
+           label = Number)) +
+  geom_text(aes(y = Percent), size = 3, nudge_y = .003) +
+  geom_bar(stat="identity", fill="blue", alpha=.5) +
+  labs(title = "Cases by Employer: Agencies with 5 or more cases",
+       caption = "CJTC certification database",
+       x = "",
+       y = "Percent of Total") +
+  
+  scale_y_continuous(labels = scales::percent_format(acc=1)) +
+  coord_flip()
+```
+
+____
+
+# Officers {.tabset}
+
+
+## All years, multiple records
+
+Here we pull out officers with more than one record in the database.
+
+```{r officers.all, message=F, warning=FALSE}
+cjtc %>%
+  arrange(date_received) %>%
+  group_by(name = officer_name) %>%
+  summarize(num = n(),
+            first.yr = first(yr.r),
+            first.emp = first(employer),
+            first.source = first(reason_for_opening_case),
+            first.outcome = first(case_determination),
+            last.yr = last(yr.r),
+            last.emp = last(employer),
+            last.source = last(reason_for_opening_case),
+            last.outcome = last(case_determination)) %>%
+  filter(num > 1) %>%
+  arrange(desc(num)) %>%
+  #select(-num) %>%
+  
+  kable(caption = "Officers with more than one record in the database") %>%
+  kable_styling(bootstrap_options = "striped")
+
+  
+
+```
+
+## Post 5051
+
+Here we pull out all officers for whom a record was added to the database post 5051.
+
+```{r officers.post, message=F, warning=FALSE}
+cjtc %>%
+  filter(period.r != "pre.5051") %>%
+  
+  arrange(date_received) %>%
+  group_by(name = officer_name) %>%
+  summarize(num = n(),
+            first.yr = first(yr.r),
+            first.emp = first(employer),
+            first.source = first(reason_for_opening_case),
+            first.outcome = first(case_determination),
+            last.yr = last(yr.r),
+            last.emp = last(employer),
+            last.source = last(reason_for_opening_case),
+            last.outcome = last(case_determination)) %>%
+
+  arrange(desc(num)) %>%
+  #select(-num) %>%
+  
+  kable(caption = "Officers added post 5051") %>%
+  kable_styling(bootstrap_options = "striped")
+
+  
+
+```
+
+# Missing Data {.tabset .tabset-pills}
+
+Key variables are missing in many cases in the database -- most important are missing data on name, employer, status and documents link.  Below we show the data missing for each of these variables.
+
+## All cases
+
+```{r missing.all}
+
+namevec <- c("officer_name", "employer", "status", "documents_link")
+
+missing.table.all <- vector("list", length(namevec))
+for(i in 1:length(namevec)) {
+  missing.table.all[[i]] <- (table(is.na(cjtc[namevec[i]])))
+  names(missing.table.all) <- namevec
+}
+
+print(missing.table.all)
+```
+
+## Post 5051
+
+```{r missing.5051}
+
+p5051 <- cjtc %>% filter(period.r != "pre.5051")
+missing.table.5051 <- vector("list", length(namevec))
+for(i in 1:length(namevec)) {
+  missing.table.5051[[i]] <- (table(is.na(p5051[namevec[i]])))
+  names(missing.table.5051) <- namevec
+}
+
+print(missing.table.5051)
+```
+
+## Closed cases
+
+```{r missing.closed}
+
+closed <- cjtc %>% filter(status == "Closed")
+missing.table.closed <- vector("list", length(namevec))
+for(i in 1:length(namevec)) {
+  missing.table.closed[[i]] <- (table(is.na(closed[namevec[i]])))
+  names(missing.table.closed) <- namevec
+}
+
+print(missing.table.closed)
+```
